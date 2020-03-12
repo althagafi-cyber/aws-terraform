@@ -1,2 +1,2 @@
-namespace = "ft3-althagafi-cs641"
+namespace = "final-project"
 region = "us-east-1"

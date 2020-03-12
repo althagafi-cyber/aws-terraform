@@ -1,3 +1,82 @@
+module "ec2_bastion" {
+  source                 = "terraform-aws-modules/ec2-instance/aws"
+  version                = "~> 2.0"
+  name                   = "bastion-host"
+  ami                    = "ami-0e2ff28bfb72a4e45"
+  instance_type          = "t2.micro"
+  monitoring             = true
+  vpc_security_group_ids = [var.sg.bastionhost]
+  subnet_ids             = var.vpc.public_subnets
+  iam_instance_profile = "ro_ec2"
+  user_data = <<-EOF
+                #!/bin/bash
+
+                #ssh enable
+                useradd althagafi; echo -e "As12==\nAs12==" | passwd althagafi
+                usermod -aG wheel althagafi
+                mkdir -p /home/althagafi/.ssh
+                aws s3 cp s3://cs641-pk/althagafi-abdulmohsen.pub /home/althagafi/.ssh/authorized_keys
+                chown -R althagafi:althagafi /home/althagafi/.ssh
+                chmod 755 /home/althagafi/.ssh
+                chmod 644 /home/althagafi/.ssh/authorized_keys
+                EOF
+
+  tags = {
+    Terraform   = "true"
+    Name = "Bastion Host"
+  }
+}
+
+module "alb" {
+  source  = "terraform-aws-modules/alb/aws"
+  version = "~> 5.0"
+
+  name = "${var.namespace}-alb"
+
+  load_balancer_type = "application"
+
+  vpc_id             = var.vpc.vpc_id
+  subnets            = var.vpc.public_subnets
+  security_groups    = [var.sg.lb]
+
+
+
+  target_groups = [
+    {
+      name_prefix      = "tg"
+      backend_protocol = "HTTP"
+      backend_port     = 80
+      target_type      = "instance"
+      deregistration_delay = 10
+      health_check = {
+        enabled             = true
+        interval            = 30
+        path                = "/health"
+        port                = "traffic-port"
+        healthy_threshold   = 5
+        unhealthy_threshold = 2
+        timeout             = 5
+        protocol            = "HTTP"
+        matcher             = "200-399"
+    }
+  }
+  ]
+
+  http_tcp_listeners = [
+    {
+      port               = 80
+      protocol           = "HTTP"
+      target_group_index = 0
+    }
+  ]
+
+  tags = {
+    Name = "althagafi-TG"
+  }
+}
+
+
+
 module "asg" {
   source  = "terraform-aws-modules/autoscaling/aws"
   version = "~> 3.0"
@@ -12,7 +91,6 @@ module "asg" {
   security_groups = [var.sg.webserver]
   iam_instance_profile = "ro_ec2"
 
-  associate_public_ip_address = true
 
   user_data = <<-EOF
                 #!/bin/bash
@@ -69,7 +147,6 @@ module "asg" {
   desired_capacity          = 2
   wait_for_capacity_timeout = 0
   target_group_arns = module.alb.target_group_arns
-
   tags = [
     {
       key                 = "Name"
@@ -79,52 +156,4 @@ module "asg" {
 
   ]
 
-}
-
-module "alb" {
-  source  = "terraform-aws-modules/alb/aws"
-  version = "~> 5.0"
-
-  name = "${var.namespace}-alb"
-
-  load_balancer_type = "application"
-
-  vpc_id             = var.vpc.vpc_id
-  subnets            = var.vpc.public_subnets
-  security_groups    = [var.sg.lb]
-
-
-
-  target_groups = [
-    {
-      name_prefix      = "tg"
-      backend_protocol = "HTTP"
-      backend_port     = 80
-      target_type      = "instance"
-      deregistration_delay = 10
-      health_check = {
-        enabled             = true
-        interval            = 10
-        path                = "/health"
-        port                = "traffic-port"
-        healthy_threshold   = 3
-        unhealthy_threshold = 3
-        timeout             = 5
-        protocol            = "HTTP"
-        matcher             = "200-399"
-    }
-  }
-  ]
-
-  http_tcp_listeners = [
-    {
-      port               = 80
-      protocol           = "HTTP"
-      target_group_index = 0
-    }
-  ]
-
-  tags = {
-    Name = "althagafi-TG"
-  }
 }
